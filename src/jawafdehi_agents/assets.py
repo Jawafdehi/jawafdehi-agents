@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def ciaa_workflow_root() -> Path:
-    return Path(__file__).resolve().parents[2] / "workflows" / "ciaa_caseworker"
+    return Path(__file__).resolve().parents[2] / "assets" / "ciaa_caseworker"
 
 
 def ciaa_instructions_path() -> Path:

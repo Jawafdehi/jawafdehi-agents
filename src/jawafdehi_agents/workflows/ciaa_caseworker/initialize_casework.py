@@ -4,8 +4,8 @@ from jawafdehi_agents.assets import ciaa_workflow_root
 from jawafdehi_agents.dependencies import get_dependencies
 from jawafdehi_agents.flyte_compat import env
 from jawafdehi_agents.models import CaseInitialization, CIAACaseInput
+from jawafdehi_agents.workflows.ciaa_caseworker.helpers import write_text
 from jawafdehi_agents.workspace import create_workspace
-from workflows.ciaa_caseworker.helpers import write_text
 
 
 @env.task

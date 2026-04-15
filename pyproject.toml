@@ -4,10 +4,7 @@ version = "0.1.0"
 description = "Flyte-based agent orchestration service for Jawafdehi workflows"
 authors = ["Jawafdehi Inquiry <inquiry@jawafdehi.org>"]
 readme = "README.md"
-packages = [
-    {include = "jawafdehi_agents", from = "src"},
-    {include = "workflows", from = "."},
-]
+packages = [{include = "jawafdehi_agents", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"

@@ -8,7 +8,9 @@ from jawafdehi_agents.dependencies import (
     use_dependencies,
 )
 from jawafdehi_agents.models import CIAACaseInput, WorkflowResult
-from workflows.ciaa_caseworker.workflow import ciaa_caseworker_workflow
+from jawafdehi_agents.workflows.ciaa_caseworker.workflow import (
+    ciaa_caseworker_workflow,
+)
 
 
 class RunService:
