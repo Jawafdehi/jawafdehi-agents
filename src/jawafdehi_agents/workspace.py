@@ -1,27 +1,28 @@
 from __future__ import annotations
 
-import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 from jawafdehi_agents.models import WorkspaceContext
 
 
 def create_workspace(case_number: str) -> WorkspaceContext:
-    root_dir = Path(tempfile.mkdtemp(prefix=f"jawaf-{case_number}-"))
+    runs_dir = Path.cwd() / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d_%H-%M-%S")
+    root_dir = runs_dir / f"jawaf-{timestamp}-{case_number}"
+    root_dir.mkdir(parents=False, exist_ok=False)
+    logs_dir = root_dir / "logs"
     sources_raw_dir = root_dir / "sources" / "raw"
     sources_markdown_dir = root_dir / "sources" / "markdown"
-    logs_dir = root_dir / "logs"
-    memory_file = root_dir / "MEMORY.md"
 
+    logs_dir.mkdir(parents=True, exist_ok=True)
     sources_raw_dir.mkdir(parents=True, exist_ok=True)
     sources_markdown_dir.mkdir(parents=True, exist_ok=True)
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    memory_file.write_text("", encoding="utf-8")
 
     return WorkspaceContext(
         root_dir=root_dir,
-        memory_file=memory_file,
+        logs_dir=logs_dir,
         sources_raw_dir=sources_raw_dir,
         sources_markdown_dir=sources_markdown_dir,
-        logs_dir=logs_dir,
     )

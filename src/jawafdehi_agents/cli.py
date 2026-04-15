@@ -3,6 +3,7 @@ from __future__ import annotations
 import typer
 
 from jawafdehi_agents.run_service import RunService
+from jawafdehi_agents.settings import get_settings
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -10,6 +11,7 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 @app.callback()
 def main_callback() -> None:
     """Jawaf CLI."""
+    get_settings()
 
 
 @app.command("run")

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
+
+import flyte
+
 from jawafdehi_agents.dependencies import get_dependencies
-from jawafdehi_agents.flyte_compat import env, group, trace
 from jawafdehi_agents.models import (
     ACCEPTED_REVIEW_OUTCOMES,
     Critique,
@@ -10,21 +13,25 @@ from jawafdehi_agents.models import (
     RefinementResult,
     ReviewOutcome,
 )
-from jawafdehi_agents.workflows.ciaa_caseworker.helpers import (
+from jawafdehi_agents.workflows.core.ciaa_caseworker.helpers import (
     render_review_markdown,
     validate_output,
     write_text,
 )
 
+logger = logging.getLogger(__name__)
 
-@trace
+env = flyte.TaskEnvironment(name="jawafdehi_agents")
+
+
+@flyte.trace
 async def critique_content(draft: str, draft_input: DraftInput) -> Critique:
     return await get_dependencies().draft_refinement_agent.critique_content(
         draft, draft_input
     )
 
 
-@trace
+@flyte.trace
 async def revise_content(
     draft: str, critique: Critique, draft_input: DraftInput
 ) -> str:
@@ -42,6 +49,7 @@ async def draft_and_refine_case_agent(
     draft_path = draft_input.workspace.root_dir / "draft.md"
     review_path = draft_input.workspace.root_dir / "draft-review.md"
 
+    logger.debug("Generating initial draft for %s", draft_input.case_number)
     draft = await get_dependencies().draft_refinement_agent.generate_draft(draft_input)
     write_text(draft_path, draft)
     validate_output(draft_path, draft_input.workspace.root_dir)
@@ -49,8 +57,20 @@ async def draft_and_refine_case_agent(
     iterations: list[RefinementIteration] = []
 
     for iteration in range(1, max_iterations + 1):
-        with group(f"refinement-{iteration}"):
+        logger.debug(
+            "Starting refinement iteration %s for %s",
+            iteration,
+            draft_input.case_number,
+        )
+        with flyte.group(f"refinement-{iteration}"):
             critique = await critique_content(draft, draft_input)
+            logger.debug(
+                "Iteration %s critique for %s scored %s with outcome %s",
+                iteration,
+                draft_input.case_number,
+                critique.score,
+                critique.outcome,
+            )
             write_text(review_path, render_review_markdown(critique))
             validate_output(review_path, draft_input.workspace.root_dir)
 
@@ -95,6 +115,11 @@ async def draft_and_refine_case_agent(
                 raise RuntimeError("Draft refinement exhausted maximum iterations")
 
             draft = await revise_content(draft, critique, draft_input)
+            logger.debug(
+                "Revised draft during iteration %s for %s",
+                iteration,
+                draft_input.case_number,
+            )
             write_text(draft_path, draft)
             validate_output(draft_path, draft_input.workspace.root_dir)
             iterations.append(

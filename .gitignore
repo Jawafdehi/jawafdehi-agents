@@ -9,3 +9,5 @@ dist/
 build/
 __pycache__/
 *.py[cod]
+.env
+runs/

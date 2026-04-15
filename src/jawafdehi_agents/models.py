@@ -37,10 +37,9 @@ ACCEPTED_REVIEW_OUTCOMES = {
 
 class WorkspaceContext(BaseModel):
     root_dir: Path
-    memory_file: Path
+    logs_dir: Path
     sources_raw_dir: Path
     sources_markdown_dir: Path
-    logs_dir: Path
 
 
 class CaseInitialization(BaseModel):
@@ -48,7 +47,6 @@ class CaseInitialization(BaseModel):
     workspace: WorkspaceContext
     asset_root: Path
     case_details_path: Path
-    summary_log_path: Path
 
 
 class SourceBundle(BaseModel):
