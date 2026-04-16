@@ -12,6 +12,7 @@ from jawafdehi_agents.models import (
     PublishedCaseResult,
     PublishInput,
     ReviewOutcome,
+    SourceArtifact,
     SourceBundle,
 )
 from jawafdehi_agents.run_service import RunService
@@ -19,17 +20,17 @@ from jawafdehi_agents.run_service import RunService
 
 class FakeNGMClient:
     async def fetch_case_details(self, case_number: str) -> str:
-        return f"# Case Details\n\n{case_number}"
+        return f"# Case Details\n\n- **Ram Bahadur Karki**\n\n{case_number}"
 
 
 class FakeSourceGatherer:
     async def gather_sources(self, initialization: CaseInitialization) -> SourceBundle:
-        raw_path = initialization.workspace.sources_raw_dir / "charge-sheet.pdf"
+        raw_path = initialization.workspace.sources_raw_dir / "special-court-case-details.txt"
         markdown_path = (
-            initialization.workspace.sources_markdown_dir / "charge-sheet.md"
+            initialization.workspace.sources_markdown_dir / "special-court-case-details.md"
         )
-        raw_path.write_text("raw", encoding="utf-8")
-        markdown_path.write_text("markdown", encoding="utf-8")
+        raw_path.write_text("raw case details", encoding="utf-8")
+        markdown_path.write_text("markdown case details", encoding="utf-8")
         return SourceBundle(
             case_number=initialization.case_number,
             workspace=initialization.workspace,
@@ -37,23 +38,99 @@ class FakeSourceGatherer:
             case_details_path=initialization.case_details_path,
             raw_sources=[raw_path],
             markdown_sources=[markdown_path],
+            case_details_artifact=SourceArtifact(
+                source_type="case_details",
+                title="Case details",
+                raw_path=raw_path,
+                markdown_path=markdown_path,
+            ),
         )
+
+    async def gather_press_release(
+        self, initialization: CaseInitialization, source_bundle: SourceBundle
+    ) -> SourceBundle:
+        raw_path = initialization.workspace.sources_raw_dir / "press-release.html"
+        markdown_path = initialization.workspace.sources_markdown_dir / "press-release.md"
+        raw_path.write_text("<html>press raw</html>", encoding="utf-8")
+        markdown_path.write_text("# Press Release\n\npress markdown", encoding="utf-8")
+        artifact = SourceArtifact(
+            source_type="press_release",
+            title="CIAA Press Release",
+            raw_path=raw_path,
+            markdown_path=markdown_path,
+            source_url="https://ciaa.gov.np/pressrelease/example",
+        )
+        return source_bundle.model_copy(
+            update={
+                "raw_sources": [*source_bundle.raw_sources, raw_path],
+                "markdown_sources": [*source_bundle.markdown_sources, markdown_path],
+                "press_release_artifact": artifact,
+            }
+        )
+
+    async def gather_charge_sheet(
+        self, initialization: CaseInitialization, source_bundle: SourceBundle
+    ) -> SourceBundle:
+        raw_path = initialization.workspace.sources_raw_dir / "charge-sheet.pdf"
+        markdown_path = initialization.workspace.sources_markdown_dir / "charge-sheet.md"
+        raw_path.write_text("charge raw", encoding="utf-8")
+        markdown_path.write_text("# Charge Sheet\n\ncharge markdown", encoding="utf-8")
+        artifact = SourceArtifact(
+            source_type="charge_sheet",
+            title="Charge Sheet",
+            raw_path=raw_path,
+            markdown_path=markdown_path,
+            source_url="https://ag.gov.np/charge-sheet.pdf",
+        )
+        return source_bundle.model_copy(
+            update={
+                "raw_sources": [*source_bundle.raw_sources, raw_path],
+                "markdown_sources": [*source_bundle.markdown_sources, markdown_path],
+                "charge_sheet_artifact": artifact,
+            }
+        )
+
+    async def gather_news_sources(
+        self, initialization: CaseInitialization, source_bundle: SourceBundle
+    ) -> SourceBundle:
+        return source_bundle
 
 
 class FakeNewsGatherer:
     async def gather_news(self, source_bundle: SourceBundle) -> SourceBundle:
-        news_path = source_bundle.workspace.sources_markdown_dir / "news-example.md"
-        news_path.write_text("news", encoding="utf-8")
+        raw_path = source_bundle.workspace.sources_raw_dir / "news-01.html"
+        markdown_path = source_bundle.workspace.sources_markdown_dir / "news-example.md"
+        raw_path.write_text("<html>news raw</html>", encoding="utf-8")
+        markdown_path.write_text("# News\n\nnews markdown", encoding="utf-8")
+        artifact = SourceArtifact(
+            source_type="news",
+            title="News Coverage",
+            raw_path=raw_path,
+            markdown_path=markdown_path,
+            external_url="https://example.com/news",
+            source_url="https://example.com/news",
+        )
         return source_bundle.model_copy(
             update={
-                "markdown_sources": [*source_bundle.markdown_sources, news_path],
+                "raw_sources": [*source_bundle.raw_sources, raw_path],
+                "markdown_sources": [*source_bundle.markdown_sources, markdown_path],
+                "news_artifacts": [*source_bundle.news_artifacts, artifact],
             }
         )
 
 
 class FakeDraftRefinementAgent:
     async def generate_draft(self, draft_input: DraftInput) -> str:
-        return "# Draft"
+        return (
+            "# Jawafdehi Case Draft\n\n"
+            "## Title\nनमुना मुद्दा\n\n"
+            "## Short Description\nछोटो विवरण\n\n"
+            "## Key Allegations\n- आरोप १\n- आरोप २\n\n"
+            "## Timeline\n- 2082-01-01: दर्ता\n\n"
+            "## Description\n"
+            + ("विस्तृत विवरण।" * 60)
+            + "\n\n## Missing Details\nथप पुष्टिकरण आवश्यक।\n"
+        )
 
     async def critique_content(self, draft: str, draft_input: DraftInput) -> Critique:
         return Critique(
@@ -67,7 +144,7 @@ class FakeDraftRefinementAgent:
     async def revise_content(
         self, draft: str, critique: Critique, draft_input: DraftInput
     ) -> str:
-        return draft + "\n\nrevised"
+        return draft
 
 
 class FakePublishFinalizer:

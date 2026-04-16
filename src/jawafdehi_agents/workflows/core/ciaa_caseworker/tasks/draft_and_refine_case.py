@@ -49,7 +49,7 @@ async def draft_and_refine_case_agent(
     draft_path = draft_input.workspace.root_dir / "draft.md"
     review_path = draft_input.workspace.root_dir / "draft-review.md"
 
-    logger.debug("Generating initial draft for %s", draft_input.case_number)
+    logger.info("[%s] draft_and_refine: generating initial draft", draft_input.case_number)
     draft = await get_dependencies().draft_refinement_agent.generate_draft(draft_input)
     write_text(draft_path, draft)
     validate_output(draft_path, draft_input.workspace.root_dir)
@@ -57,17 +57,18 @@ async def draft_and_refine_case_agent(
     iterations: list[RefinementIteration] = []
 
     for iteration in range(1, max_iterations + 1):
-        logger.debug(
-            "Starting refinement iteration %s for %s",
-            iteration,
+        logger.info(
+            "[%s] draft_and_refine: refinement iteration %s/%s",
             draft_input.case_number,
+            iteration,
+            max_iterations,
         )
         with flyte.group(f"refinement-{iteration}"):
             critique = await critique_content(draft, draft_input)
-            logger.debug(
-                "Iteration %s critique for %s scored %s with outcome %s",
-                iteration,
+            logger.info(
+                "[%s] draft_and_refine: critique iteration %s scored %s with outcome %s",
                 draft_input.case_number,
+                iteration,
                 critique.score,
                 critique.outcome,
             )
@@ -115,10 +116,10 @@ async def draft_and_refine_case_agent(
                 raise RuntimeError("Draft refinement exhausted maximum iterations")
 
             draft = await revise_content(draft, critique, draft_input)
-            logger.debug(
-                "Revised draft during iteration %s for %s",
-                iteration,
+            logger.info(
+                "[%s] draft_and_refine: revised draft after iteration %s",
                 draft_input.case_number,
+                iteration,
             )
             write_text(draft_path, draft)
             validate_output(draft_path, draft_input.workspace.root_dir)

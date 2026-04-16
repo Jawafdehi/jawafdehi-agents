@@ -22,6 +22,7 @@ class Settings(BaseSettings):
         default="https://nes.jawafdehi.org",
         alias="NES_API_BASE_URL",
     )
+    news_article_limit: int = Field(default=5, alias="NEWS_ARTICLE_LIMIT")
     llm_model: str = Field(default="gpt-5.4", alias="LLM_MODEL")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_base_url: str | None = Field(default=None, alias="OPENAI_BASE_URL")

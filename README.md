@@ -1,6 +1,8 @@
 # Jawafdehi Agents
 
-Flyte-based agent orchestration service for Jawafdehi workflows.
+Superseded by `services/jawaf-span`.
+
+This service captured the earlier Flyte-based CIAA orchestration experiment. The active CIAA caseworker implementation now lives in `services/jawaf-span` and uses AgentSpan.
 
 ## Development
 

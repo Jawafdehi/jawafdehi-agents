@@ -9,14 +9,25 @@ from typing import Any, Protocol
 
 import httpx
 
+from jawafdehi_agents.assets import ciaa_case_template_path, ciaa_instructions_path
+
 from jawafdehi_agents.models import (
     CaseInitialization,
     Critique,
     DraftInput,
     PublishedCaseResult,
     PublishInput,
+    SourceArtifact,
     SourceBundle,
 )
+
+from .runtime_clients import (
+    DocumentConversionClient,
+    LLMClient,
+    NewsSearchClient,
+    RemoteDocumentFetcher,
+)
+from .source_gatherers import WorkspaceSourceGatherer
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +39,18 @@ class NGMClient(Protocol):
 class SourceGatherer(Protocol):
     async def gather_sources(
         self, initialization: CaseInitialization
+    ) -> SourceBundle: ...
+
+    async def gather_press_release(
+        self, initialization: CaseInitialization, source_bundle: SourceBundle
+    ) -> SourceBundle: ...
+
+    async def gather_charge_sheet(
+        self, initialization: CaseInitialization, source_bundle: SourceBundle
+    ) -> SourceBundle: ...
+
+    async def gather_news_sources(
+        self, initialization: CaseInitialization, source_bundle: SourceBundle
     ) -> SourceBundle: ...
 
 
@@ -390,49 +413,87 @@ class JawafdehiAPINGMClient:
         return self._format_markdown(court_info, case_info, hearings, entities)
 
 
-class WorkspaceSourceGatherer:
-    async def gather_sources(self, initialization: CaseInitialization) -> SourceBundle:
-        logger.debug(
-            "Preparing workspace-backed source bundle for %s",
-            initialization.case_number,
-        )
-        raw_case_details_path = (
-            initialization.workspace.sources_raw_dir / "special-court-case-details.txt"
-        )
-        markdown_case_details_path = (
-            initialization.workspace.sources_markdown_dir
-            / "special-court-case-details.md"
-        )
-        case_details = initialization.case_details_path.read_text(encoding="utf-8")
-        raw_case_details_path.write_text(case_details, encoding="utf-8")
-        markdown_case_details_path.write_text(case_details, encoding="utf-8")
-        logger.debug(
-            "Workspace-backed sources created at %s and %s for %s",
-            raw_case_details_path,
-            markdown_case_details_path,
-            initialization.case_number,
-        )
-        return SourceBundle(
-            case_number=initialization.case_number,
-            workspace=initialization.workspace,
-            asset_root=initialization.asset_root,
-            case_details_path=initialization.case_details_path,
-            raw_sources=[raw_case_details_path],
-            markdown_sources=[markdown_case_details_path],
-        )
+class SearchBackedNewsGatherer:
+    def __init__(
+        self,
+        *,
+        search_client: NewsSearchClient,
+        fetcher: RemoteDocumentFetcher,
+        converter: DocumentConversionClient,
+    ) -> None:
+        self.search_client = search_client
+        self.fetcher = fetcher
+        self.converter = converter
 
+    @staticmethod
+    def _slugify(value: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+        return slug or "news"
 
-class NoOpNewsGatherer:
     async def gather_news(self, source_bundle: SourceBundle) -> SourceBundle:
-        logger.debug(
-            "No additional news integration configured for %s; preserving %s markdown sources",
-            source_bundle.case_number,
-            len(source_bundle.markdown_sources),
-        )
-        return source_bundle
+        hints: list[str] = []
+        if source_bundle.press_release_artifact is not None:
+            hints.append(source_bundle.press_release_artifact.title)
+        if source_bundle.charge_sheet_artifact is not None:
+            hints.append(source_bundle.charge_sheet_artifact.title)
+        if not hints:
+            hints.append(source_bundle.case_number)
+        results = await self.search_client.search(source_bundle.case_number, hints)
+        bundle = source_bundle
+        for index, result in enumerate(results, start=1):
+            slug = self._slugify(result["title"])
+            raw_path = (
+                source_bundle.workspace.sources_raw_dir
+                / f"news-{index:02d}-{slug}.html"
+            )
+            markdown_path = (
+                source_bundle.workspace.sources_markdown_dir
+                / f"news-{index:02d}-{slug}.md"
+            )
+            downloaded_path = await self.fetcher.download(result["url"], raw_path)
+            converted_markdown = await self.converter.convert_file_to_markdown(
+                downloaded_path, markdown_path
+            )
+            markdown_path.write_text(
+                (
+                    f"# {result['title']}\n\n"
+                    f"- URL: {result['url']}\n"
+                    f"- Case number: {source_bundle.case_number}\n\n"
+                    "## Converted content\n\n"
+                    f"{converted_markdown.strip()}\n"
+                ),
+                encoding="utf-8",
+            )
+            artifact = SourceArtifact(
+                source_type="news",
+                title=result["title"],
+                raw_path=downloaded_path,
+                markdown_path=markdown_path,
+                source_url=result["url"],
+                external_url=result["url"],
+                identifier=f"{index:02d}-{slug}",
+                notes="Discovered through live news search and converted to markdown.",
+            )
+            raw_sources = list(bundle.raw_sources)
+            markdown_sources = list(bundle.markdown_sources)
+            if artifact.raw_path not in raw_sources:
+                raw_sources.append(artifact.raw_path)
+            if artifact.markdown_path not in markdown_sources:
+                markdown_sources.append(artifact.markdown_path)
+            bundle = bundle.model_copy(
+                update={
+                    "raw_sources": raw_sources,
+                    "markdown_sources": markdown_sources,
+                    "news_artifacts": [*bundle.news_artifacts, artifact],
+                }
+            )
+        return bundle
 
 
-class DeterministicDraftRefinementAgent:
+class SourceGroundedDraftRefinementAgent:
+    def __init__(self, llm_client: LLMClient) -> None:
+        self.llm_client = llm_client
+
     @staticmethod
     def _extract_markdown_section(document: str, heading: str) -> str:
         pattern = rf"(?ms)^## {re.escape(heading)}\s*\n(.*?)(?=^## |\Z)"
@@ -442,86 +503,122 @@ class DeterministicDraftRefinementAgent:
         return match.group(1).strip()
 
     @staticmethod
-    def _derive_title(case_number: str, case_details: str) -> str:
-        defendant_match = re.search(r"(?m)^- \*\*(.+?)\*\*", case_details)
-        if defendant_match:
-            return (
-                f"Special Court corruption case {case_number} involving "
-                f"{defendant_match.group(1)}"
+    def _load_markdown_sources(draft_input: DraftInput) -> str:
+        sections: list[str] = []
+        for path in draft_input.markdown_sources:
+            if not path.exists():
+                continue
+            sections.append(
+                f"\n# Source File: {path.name}\n\n{path.read_text(encoding='utf-8').strip()}"
             )
-        return f"Special Court corruption case {case_number}"
+        return "\n\n".join(sections).strip()
 
-    async def generate_draft(self, draft_input: DraftInput) -> str:
-        logger.debug(
-            "Generating deterministic draft body for %s", draft_input.case_number
-        )
-        case_details = draft_input.case_details_path.read_text(encoding="utf-8")
-        title = self._derive_title(draft_input.case_number, case_details)
-        short_description = (
-            f"Structured draft for Special Court case {draft_input.case_number} "
-            "prepared from judicial extraction records."
-        )
-        key_allegations = (
-            "- The case has been extracted from the Special Court judicial record.\n"
-            "- Facts still require supporting primary-source and reporting enrichment."
-        )
-        timeline = "- Registration recorded in Special Court data extract."
-        description = (
-            "This draft was generated from the Special Court judicial extract captured "
-            "during workflow initialization.\n\n"
-            "## Judicial Extract\n\n"
-            f"{case_details.strip()}"
-        )
-        missing_details = (
-            "Additional source documents, corroborating media coverage, and entity "
-            "resolution should be added in a later workflow revision."
-        )
+    @staticmethod
+    def _render_draft_from_payload(payload: dict[str, Any]) -> str:
+        key_allegations = payload.get("key_allegations") or []
+        if isinstance(key_allegations, list):
+            rendered_allegations = "\n".join(
+                f"- {item}" for item in key_allegations if str(item).strip()
+            )
+        else:
+            rendered_allegations = str(key_allegations).strip()
+        timeline_items = payload.get("timeline") or []
+        if isinstance(timeline_items, list):
+            rendered_timeline = "\n".join(
+                f"- {item}" for item in timeline_items if str(item).strip()
+            )
+        else:
+            rendered_timeline = str(timeline_items).strip()
         return (
             "# Jawafdehi Case Draft\n\n"
             "## Title\n"
-            f"{title}\n\n"
+            f"{str(payload.get('title', '')).strip()}\n\n"
             "## Short Description\n"
-            f"{short_description}\n\n"
+            f"{str(payload.get('short_description', '')).strip()}\n\n"
             "## Key Allegations\n"
-            f"{key_allegations}\n\n"
+            f"{rendered_allegations}\n\n"
             "## Timeline\n"
-            f"{timeline}\n\n"
+            f"{rendered_timeline}\n\n"
             "## Description\n"
-            f"{description}\n\n"
+            f"{str(payload.get('description', '')).strip()}\n\n"
             "## Missing Details\n"
-            f"{missing_details}\n"
+            f"{str(payload.get('missing_details', '')).strip()}\n"
         )
 
-    async def critique_content(self, draft: str, draft_input: DraftInput) -> Critique:
-        logger.debug(
-            "Running deterministic draft critique for %s", draft_input.case_number
+    async def generate_draft(self, draft_input: DraftInput) -> str:
+        instructions = ciaa_instructions_path().read_text(encoding="utf-8")
+        template = ciaa_case_template_path().read_text(encoding="utf-8")
+        case_details = draft_input.case_details_path.read_text(encoding="utf-8")
+        source_markdown = self._load_markdown_sources(draft_input)
+        payload = await self.llm_client.generate_json(
+            system_prompt=(
+                "You write Jawafdehi corruption case drafts in Nepali. "
+                "Only use the supplied source material. Return JSON with keys: "
+                "title, short_description, key_allegations, timeline, description, missing_details."
+            ),
+            user_prompt=(
+                f"Instructions:\n{instructions}\n\n"
+                f"Template:\n{template}\n\n"
+                f"Case number: {draft_input.case_number}\n\n"
+                f"Special Court extract:\n{case_details}\n\n"
+                f"Source markdown:\n{source_markdown}"
+            ),
         )
+        return self._render_draft_from_payload(payload)
+
+    async def critique_content(self, draft: str, draft_input: DraftInput) -> Critique:
         required_headings = [
             "## Title",
             "## Short Description",
             "## Key Allegations",
+            "## Timeline",
             "## Description",
             "## Missing Details",
         ]
-        missing = [heading for heading in required_headings if heading not in draft]
-        if missing:
+        missing_headings = [heading for heading in required_headings if heading not in draft]
+        improvements: list[str] = []
+        blockers: list[str] = []
+        strengths: list[str] = []
+        if missing_headings:
+            blockers.append(
+                "Missing required draft sections: " + ", ".join(missing_headings)
+            )
+        if len(draft_input.markdown_sources) < 3:
+            blockers.append("Insufficient markdown sources were gathered before drafting.")
+        if "example.invalid" in draft or "placeholder" in draft.lower() or "simulat" in draft.lower():
+            blockers.append("Draft still contains placeholder or simulated content.")
+        description = self._extract_markdown_section(draft, "Description")
+        allegations = self._extract_markdown_section(draft, "Key Allegations")
+        missing_details = self._extract_markdown_section(draft, "Missing Details")
+        if len(description) < 500:
+            improvements.append("Expand the description with evidence-grounded factual detail.")
+        if allegations.count("- ") < 2:
+            improvements.append("Provide at least two concrete allegation bullets.")
+        if not missing_details:
+            improvements.append("Document unresolved gaps in Missing Details.")
+        if not blockers:
+            strengths.append("Draft includes the required structured sections.")
+            strengths.append("Draft was generated from live source artifacts and court extract.")
+        if blockers:
             return Critique(
-                score=4,
+                score=2,
+                outcome="blocked",
+                strengths=strengths,
+                improvements=improvements,
+                blockers=blockers,
+            )
+        if improvements:
+            return Critique(
+                score=7,
                 outcome="needs_revision",
-                strengths=["Draft file was generated successfully."],
-                improvements=[
-                    "Add the required draft sections before publication: "
-                    + ", ".join(missing)
-                ],
+                strengths=strengths,
+                improvements=improvements,
                 blockers=[],
             )
         return Critique(
             score=9,
             outcome="approved",
-            strengths=[
-                "Draft contains the required publishing sections.",
-                "Draft is grounded in the Special Court case extract.",
-            ],
+            strengths=[*strengths, "Draft meets minimum source-grounded publication checks."],
             improvements=[],
             blockers=[],
         )
@@ -529,17 +626,22 @@ class DeterministicDraftRefinementAgent:
     async def revise_content(
         self, draft: str, critique: Critique, draft_input: DraftInput
     ) -> str:
-        logger.debug(
-            "Applying deterministic draft revision for %s with %s improvements",
-            draft_input.case_number,
-            len(critique.improvements),
+        case_details = draft_input.case_details_path.read_text(encoding="utf-8")
+        source_markdown = self._load_markdown_sources(draft_input)
+        payload = await self.llm_client.generate_json(
+            system_prompt=(
+                "Revise the Jawafdehi case draft in Nepali. Use only the supplied sources and "
+                "address every critique item. Return JSON with keys: title, short_description, "
+                "key_allegations, timeline, description, missing_details."
+            ),
+            user_prompt=(
+                f"Current draft:\n{draft}\n\n"
+                f"Critique JSON:\n{critique.model_dump_json(indent=2)}\n\n"
+                f"Case details:\n{case_details}\n\n"
+                f"Source markdown:\n{source_markdown}"
+            ),
         )
-        if "## Missing Details" not in draft:
-            return (
-                draft
-                + "\n\n## Missing Details\nWorkflow revision inserted this section.\n"
-            )
-        return draft
+        return self._render_draft_from_payload(payload)
 
 
 class JawafdehiAPIPublishFinalizer:
@@ -595,9 +697,12 @@ class JawafdehiAPIPublishFinalizer:
 
     @staticmethod
     def _build_patch_operations(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        patchable_payload = {
+            field: value for field, value in payload.items() if field != "case_type"
+        }
         return [
             {"op": "replace", "path": f"/{field}", "value": value}
-            for field, value in payload.items()
+            for field, value in patchable_payload.items()
         ]
 
     @staticmethod
@@ -757,19 +862,43 @@ class WorkflowDependencies:
 
 
 def build_default_dependencies() -> WorkflowDependencies:
+    from jawafdehi_agents.settings import get_settings
+
+    settings = get_settings()
+    if not settings.openai_api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY is required for live drafting and critique in jawafdehi-agents."
+        )
+    fetcher = RemoteDocumentFetcher()
+    converter = DocumentConversionClient()
+    llm_client = LLMClient(
+        api_key=settings.openai_api_key,
+        model=settings.llm_model,
+        base_url=settings.openai_base_url,
+    )
     return WorkflowDependencies(
         ngm_client=JawafdehiAPINGMClient(),
-        source_gatherer=WorkspaceSourceGatherer(),
-        news_gatherer=NoOpNewsGatherer(),
-        draft_refinement_agent=DeterministicDraftRefinementAgent(),
+        source_gatherer=WorkspaceSourceGatherer(fetcher=fetcher, converter=converter),
+        news_gatherer=SearchBackedNewsGatherer(
+            search_client=NewsSearchClient(
+                llm_client=llm_client,
+                article_limit=settings.news_article_limit,
+            ),
+            fetcher=fetcher,
+            converter=converter,
+        ),
+        draft_refinement_agent=SourceGroundedDraftRefinementAgent(llm_client=llm_client),
         publish_finalizer=JawafdehiAPIPublishFinalizer(),
     )
 
 
-_CURRENT_DEPENDENCIES = build_default_dependencies()
+_CURRENT_DEPENDENCIES: WorkflowDependencies | None = None
 
 
 def get_dependencies() -> WorkflowDependencies:
+    global _CURRENT_DEPENDENCIES
+    if _CURRENT_DEPENDENCIES is None:
+        _CURRENT_DEPENDENCIES = build_default_dependencies()
     return _CURRENT_DEPENDENCIES
 
 

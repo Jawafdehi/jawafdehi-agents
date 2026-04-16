@@ -23,12 +23,12 @@ async def initialize_casework(
     asset_root = ciaa_workflow_root()
     case_details_path = workspace.root_dir / f"special:{case_input.case_number}.md"
 
-    logger.debug("Fetching NGM case details for %s", case_input.case_number)
+    logger.info("[%s] initialize_casework: fetching NGM case details", case_input.case_number)
     case_details = await dependencies.ngm_client.fetch_case_details(
         case_input.case_number
     )
     write_text(case_details_path, case_details)
-    logger.debug("Wrote case details to %s", case_details_path)
+    logger.info("[%s] initialize_casework: wrote case details to %s", case_input.case_number, case_details_path)
 
     return CaseInitialization(
         case_number=case_input.case_number,

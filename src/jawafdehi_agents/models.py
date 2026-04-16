@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field, StringConstraints
 
@@ -49,6 +49,17 @@ class CaseInitialization(BaseModel):
     case_details_path: Path
 
 
+class SourceArtifact(BaseModel):
+    source_type: Literal["case_details", "press_release", "charge_sheet", "news"]
+    title: str
+    raw_path: Path
+    markdown_path: Path
+    source_url: str | None = None
+    external_url: str | None = None
+    identifier: str | None = None
+    notes: str | None = None
+
+
 class SourceBundle(BaseModel):
     case_number: str
     workspace: WorkspaceContext
@@ -56,6 +67,10 @@ class SourceBundle(BaseModel):
     case_details_path: Path
     raw_sources: list[Path] = Field(default_factory=list)
     markdown_sources: list[Path] = Field(default_factory=list)
+    case_details_artifact: SourceArtifact | None = None
+    press_release_artifact: SourceArtifact | None = None
+    charge_sheet_artifact: SourceArtifact | None = None
+    news_artifacts: list[SourceArtifact] = Field(default_factory=list)
 
 
 class DraftInput(BaseModel):

@@ -9,6 +9,7 @@ from jawafdehi_agents.dependencies import (
     use_dependencies,
 )
 from jawafdehi_agents.logging_utils import configure_run_logging
+from jawafdehi_agents.otel_utils import configure_console_tracing
 from jawafdehi_agents.models import CIAACaseInput, WorkflowResult
 from jawafdehi_agents.workflows.core.ciaa_caseworker.workflow import (
     ciaa_caseworker_workflow,
@@ -24,6 +25,7 @@ class RunService:
         case_input = CIAACaseInput(case_number=case_number)
         workspace = create_workspace(case_input.case_number)
         log_path = configure_run_logging(workspace.logs_dir, case_input.case_number)
+        configure_console_tracing()
         logger = logging.getLogger(__name__)
         logger.debug("Starting workflow run for %s", case_input.case_number)
         logger.debug("Run workspace initialized at %s", workspace.root_dir)

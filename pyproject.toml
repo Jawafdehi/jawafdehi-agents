@@ -13,6 +13,8 @@ pydantic-settings = "^2.11.0"
 typer = "^0.16.0"
 flyte = {version = ">=2.0.0b1,<3.0.0", allow-prereleases = true}
 httpx = "^0.28.1"
+markitdown = {extras = ["docx", "pdf", "pptx", "xlsx"], version = "^0.1.5"}
+openai = "^1.79.0"
 
 [tool.poetry.group.dev.dependencies]
 hypothesis = "^6.148.2"
@@ -20,6 +22,7 @@ pytest = "^9.0.1"
 pytest-asyncio = "^1.3.0"
 black = "^26.3.0"
 ruff = "^0.15.5"
+opentelemetry-sdk = "^1.36.0"
 
 [tool.poetry.scripts]
 jawaf = "jawafdehi_agents.cli:main"
