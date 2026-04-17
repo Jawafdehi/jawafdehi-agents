@@ -1,8 +1,8 @@
 # Jawafdehi Agents
 
-Superseded by `services/jawaf-span`.
+Superseded by `services/jawafdehi-agentspan`.
 
-This service captured the earlier Flyte-based CIAA orchestration experiment. The active CIAA caseworker implementation now lives in `services/jawaf-span` and uses AgentSpan.
+This service captured the earlier Flyte-based CIAA orchestration experiment. The active CIAA caseworker implementation now lives in `services/jawafdehi-agentspan` and uses AgentSpan.
 
 ## Development
 
