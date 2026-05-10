@@ -31,4 +31,8 @@ Run the CLI:
 
 ```bash
 poetry run jawaf run 081-CR-0046
+
+## License
+
+Licensed under the [Hippocratic License 3.0](./LICENSE), an [Ethical Source](https://ethicalsource.dev) license. See [LICENSING.md](./LICENSING.md) for details.
 ```
